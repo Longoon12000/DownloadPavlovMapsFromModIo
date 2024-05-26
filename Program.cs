@@ -119,8 +119,16 @@ namespace ModDownloader
             this.skipFailedDownloads = skipFailedDownloads;
         }
 
+        private static DateTime lastRequest = DateTime.MinValue;
+        private static readonly int requestDelay = 150;
+
         private static HttpClient createClient(string accessToken)
         {
+            int waitTime = requestDelay - (int)(DateTime.Now - lastRequest).TotalMilliseconds;
+            if (waitTime > 0)
+            {
+                Task.Delay(waitTime).Wait();
+            }
             HttpClient client = new();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             return client;

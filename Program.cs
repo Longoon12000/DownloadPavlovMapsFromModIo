@@ -126,14 +126,14 @@ namespace ModDownloader
             return client;
         }
 
-        private static async Task<HttpResponseMessage> get(string endpoint, HttpClient client)
+        private static async Task<HttpResponseMessage> getResponse(string endpoint, HttpClient client)
         {
             return await client.GetAsync($"{modIoBaseUrl}{endpoint}");
         }
 
-        private static async Task<string> getString(string endpoint, HttpClient client)
+        private static async Task<string> getResponseString(string endpoint, HttpClient client)
         {
-            HttpResponseMessage response = await get(endpoint, client);
+            HttpResponseMessage response = await getResponse(endpoint, client);
             return await response.Content.ReadAsStringAsync();
         }
 
@@ -225,7 +225,7 @@ namespace ModDownloader
                         continue;
                     }
                     HttpClient clientTest = createClient(accessToken);
-                    HttpResponseMessage response = await get("/me", clientTest);
+                    HttpResponseMessage response = await getResponse("/me", clientTest);
                     if (!response.IsSuccessStatusCode)
                     {
                         Console.WriteLine("Failed to get user data from Mod.io. Make sure your token is correct and has read permissions.");
@@ -307,7 +307,7 @@ namespace ModDownloader
 
                 try
                 {
-                    subscribedModsJson = await getString($"/me/subscribed?game_id=3959&_limit={limit}&_offset={offset}", client);
+                    subscribedModsJson = await getResponseString($"/me/subscribed?game_id=3959&_limit={limit}&_offset={offset}", client);
                 }
                 catch (Exception ex)
                 {
@@ -376,6 +376,7 @@ namespace ModDownloader
                 Console.WriteLine($"Found {installedMods.Length} installed but not subscribed Pavlov VR mods.");
                 Console.WriteLine("Checking for updates...");
 
+                List<string> modIds = new List<string>();
                 foreach (string modDirectory in installedMods)
                 {
                     string? modId = modDirectory.Split("UGC").Skip(1).FirstOrDefault();
@@ -387,21 +388,46 @@ namespace ModDownloader
                         Console.ResetColor();
                         continue;
                     }
-
+                    modIds.Add(modId);
+                }
+                
+                string modIdsString = string.Join(",", modIds.ToArray());
+                offset = 0;
+                total = 0;
+                allPages = false;
+                while (!allPages)
+                {
                     try
                     {
-                        JObject mod = JObject.Parse(await getString($"/games/3959/mods/{modId}", client));
-                        if (mod["error"] is not null)
+                        JObject jsonData = JObject.Parse(await getResponseString($"/games/3959/mods?id-in={modIdsString}&_offset={offset}&_limit={limit}", client));
+                        if (jsonData["error"] is not null)
                         {
-                            throw new Exception(mod["error"]?["message"]?.ToString() ?? $"Unknown error ({mod})");
+                            throw new Exception(jsonData["error"]?["message"]?.ToString() ?? $"Unknown error ({jsonData})");
                         }
-                        subscribedMods.Add(mod);
+
+                        if (jsonData["result_count"]?.Value<int>() is int resultCount && jsonData["result_total"]?.Value<int>() is int resultTotal)
+                        {
+                            total += resultCount;
+
+                            if (resultTotal > total)
+                            {
+                                offset += limit;
+                            }
+                            else
+                            {
+                                allPages = true;
+                            }
+                        }
+
+                        JArray mods = (JArray)jsonData["data"]!;
+
+                        subscribedMods.AddRange(mods.ToObject<List<JObject>>());
                     }
                     catch (Exception ex)
                     {
                         Console.ForegroundColor = ConsoleColor.Yellow;
                         Console.WriteLine(ex.Message);
-                        Console.WriteLine($"Failed to get mod information for {modDirectory}. Skipping.");
+                        Console.WriteLine($"Failed to get mod information for installed mods. Skipping.");
                         Console.ResetColor();
                     }
                 }
@@ -490,7 +516,7 @@ namespace ModDownloader
 
             foreach (Mod mod in modsToDownload.Where(m => m.Download).OrderByDescending(m => m.Exists))
             {
-                string modFilesJson = await getString($"/games/3959/mods/{mod.Id}/files/{mod.LatestVersion}", client);
+                string modFilesJson = await getResponseString($"/games/3959/mods/{mod.Id}/files/{mod.LatestVersion}", client);
 
                 JObject jsonData = JObject.Parse(modFilesJson);
 
